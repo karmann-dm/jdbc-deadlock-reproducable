@@ -20,6 +20,17 @@ import java.util.List;
 public class Main {
 
     private static final byte[] BLOB = prepareBlob();
+    private static final Object[][] ARGUMENTS = prepareArguments();
+
+    private static Object[][] prepareArguments() {
+        Object[][] arguments = new Object[5][2];
+        for (int i = 0; i < 5; i++) {
+            arguments[i][0] = i + 1;
+            arguments[i][1] = BLOB;
+        }
+        return arguments;
+    }
+
     private static final String SQL = "INSERT INTO some_table(id, some_blob) VALUES (?, ?)";
 
     public static void main(String[] args) throws Exception {
@@ -27,8 +38,8 @@ public class Main {
         try (HikariDataSource dataSource = new HikariDataSource(config)) {
             try (Connection connection = dataSource.getConnection()) {
                 runBatchApacheQueryRunner(connection); // stuck
-//                runBatchPureJdbc(connection); // works ok
-//                runBatchJdbcTemplate(dataSource); // works ok
+                //runBatchPureJdbc(connection); // works ok
+                //runBatchJdbcTemplate(dataSource); // works ok
             }
         }
     }
@@ -36,9 +47,7 @@ public class Main {
     private static void runBatchPureJdbc(Connection connection) throws Exception {
         try (PreparedStatement statement = connection.prepareStatement(SQL, Statement.RETURN_GENERATED_KEYS)) {
             for (int i = 0; i < 5; i++) {
-                statement.setInt(1, i + 1);
-                statement.setBytes(2, BLOB);
-                statement.addBatch();
+                fillStatement(statement, ARGUMENTS[i]);
             }
             statement.executeBatch();
 
@@ -49,16 +58,16 @@ public class Main {
         }
     }
 
-    private static void runBatchApacheQueryRunner(Connection connection) throws Exception {
-        QueryRunner queryRunner = new QueryRunner();
-        Object[][] params = new Object[5][2];
-
-        for (int i = 0; i < 5; i++) {
-            params[i][0] = i + 1;
-            params[i][1] = BLOB;
+    private static void fillStatement(PreparedStatement statement, Object[] params) throws Exception {
+        for (int i = 0; i < params.length; i++) {
+            statement.setObject(i + 1, params[i]);
         }
+        statement.addBatch();
+    }
 
-        List<Entity> entities = queryRunner.insertBatch(connection, SQL, Main::getGeneratedKeys, params);
+    private static void runBatchApacheQueryRunner(Connection connection) throws Exception {
+        CustomQueryRunner queryRunner = new CustomQueryRunner();
+        List<Entity> entities = queryRunner.insertBatch(connection, SQL, Main::getGeneratedKeys, ARGUMENTS);
         entities.forEach(entity -> System.out.println("Id = " + entity.id + ", bytes length = " + entity.blob.length));
     }
 
@@ -75,7 +84,7 @@ public class Main {
         updateBatch.setBatchSize(5);
 
         for (int i = 0; i < 5; i++) {
-            updateBatch.update(new Object[] { i + 1, BLOB }, keyHolder);
+            updateBatch.update(ARGUMENTS[i], keyHolder);
         }
         updateBatch.flush();
     }
@@ -111,6 +120,7 @@ public class Main {
         config.setPassword("pass");
         config.setDriverClassName(Driver.class.getCanonicalName());
         config.setJdbcUrl("jdbc:postgresql://localhost:" + DbContainer.getPort() + "/dbname");
+        config.addDataSourceProperty("sendBufferSize", 512 * 1024);
         return config;
     }
 }
